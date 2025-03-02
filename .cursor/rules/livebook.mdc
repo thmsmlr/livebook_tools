@@ -1,0 +1,9 @@
+---
+description: Helpful tips while editing a Livebook .livemd file
+globs: *.livemd
+---
+
+# Your rule content
+
+- You can @ files here
+- You can use markdown but dont have to
