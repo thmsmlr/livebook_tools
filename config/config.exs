@@ -21,3 +21,11 @@ config :livebook,
   within_iframe: false
 
 config :livebook, Livebook.Apps.Manager, retry_backoff_base_ms: 5_000
+
+# Configure MIME types for SSE
+config :mime, :types, %{
+  "text/event-stream" => ["sse"]
+}
+
+# Configure the MCP Server
+config :mcp_sse, :mcp_server, LivebookTools.MCP.Server

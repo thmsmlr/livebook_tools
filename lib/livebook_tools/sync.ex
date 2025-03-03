@@ -57,6 +57,32 @@ defmodule LivebookTools.Sync do
     end
   end
 
+  def get_livemd_outputs(livebook_pid) do
+    state = :sys.get_state(livebook_pid)
+    notebook = state.data.notebook
+
+    [notebook.setup_section | notebook.sections]
+    |> Enum.flat_map(& &1.cells)
+    |> Enum.map(fn
+      %Livebook.Notebook.Cell.Code{source: source, language: language, outputs: outputs} ->
+        outputs = Enum.map(outputs, fn {_idx, output} -> output end)
+
+        """
+        ```#{language}
+        #{source}
+        ```
+
+        ```outputs
+        #{inspect(outputs, pretty: true, width: 0)}
+        ```
+        """
+
+      _ ->
+        ""
+    end)
+    |> Enum.join("\n")
+  end
+
   def cells(livebook_pid) do
     state = :sys.get_state(livebook_pid)
     cells = state.data.notebook.sections |> Enum.flat_map(& &1.cells)

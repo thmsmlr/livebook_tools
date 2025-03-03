@@ -9,11 +9,6 @@ defmodule LivebookTools.CLI do
   Entry point for the command-line application.
   """
   def main(args) do
-    rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
-    Node.start(node_name)
-    Node.set_cookie(Node.self(), :secret)
-
     {opts, cmd_args, _} =
       OptionParser.parse(
         args,
@@ -24,6 +19,23 @@ defmodule LivebookTools.CLI do
     case {opts, cmd_args} do
       {%{help: true}, _} ->
         print_help()
+
+      {_, ["mcp_server"]} ->
+        mcp_server()
+
+      {_, ["get_livemd_outputs" | rest]} ->
+        case rest do
+          [file_path] ->
+            get_livemd_outputs(file_path)
+
+          [] ->
+            IO.puts("Error: Missing file path for get_livemd_outputs command\n")
+            print_help()
+
+          _ ->
+            IO.puts("Error: Too many arguments for get_livemd_outputs command\n")
+            print_help()
+        end
 
       {_, ["watch" | rest]} ->
         case rest do
@@ -87,7 +99,6 @@ defmodule LivebookTools.CLI do
   def run(file_path) do
     with {:ok, content} <- File.read(file_path),
          {notebook, _} <- Livebook.LiveMarkdown.notebook_from_livemd(content) do
-
       exs_file = """
       Process.put(:livebook_success, false)
       #{Livebook.Notebook.Export.Elixir.notebook_to_elixir(notebook)}
@@ -107,10 +118,13 @@ defmodule LivebookTools.CLI do
       File.write!(tmp_after_file_path, after_exs_file)
 
       port =
-        Port.open({:spawn, "bash -c 'cat #{tmp_after_file_path} | iex --dot-iex #{tmp_file_path}'"}, [
-          :nouse_stdio,
-          :exit_status
-        ])
+        Port.open(
+          {:spawn, "bash -c 'cat #{tmp_after_file_path} | iex --dot-iex #{tmp_file_path}'"},
+          [
+            :nouse_stdio,
+            :exit_status
+          ]
+        )
 
       receive do
         {^port, {:exit_status, exit_code}} ->
@@ -124,6 +138,7 @@ defmodule LivebookTools.CLI do
   Watches a Livebook file for changes and syncs it with an open Livebook session.
   """
   def watch(file_path) do
+    ensure_node_started()
     file_path = Path.expand(file_path)
     IO.puts("Watching #{file_path} for changes...")
 
@@ -164,7 +179,6 @@ defmodule LivebookTools.CLI do
   def convert(input_path, output_path) do
     with {:ok, content} <- File.read(input_path),
          {notebook, _} <- Livebook.LiveMarkdown.notebook_from_livemd(content) do
-
       exs_content = Livebook.Notebook.Export.Elixir.notebook_to_elixir(notebook)
 
       case File.write(output_path, exs_content) do
@@ -190,6 +204,51 @@ defmodule LivebookTools.CLI do
     end
   end
 
+  def mcp_server() do
+    ensure_node_started()
+    LivebookTools.MCPServer.start()
+  end
+
+  @doc """
+  Gets the outputs of a Livebook file by connecting to a running Livebook instance.
+  """
+  def get_livemd_outputs(file_path) do
+    ensure_node_started()
+    file_path = Path.expand(file_path)
+
+    with {:ok, livebook_node} <- LivebookTools.Sync.discover_livebook_node(),
+         true <- Node.connect(livebook_node),
+         {:ok, livebook_pid} <- LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
+      outputs = LivebookTools.Sync.get_livemd_outputs(livebook_pid)
+      IO.puts(outputs)
+    else
+      {:error, :no_livebook_node} ->
+        IO.puts("""
+        Error: No livebook node found.
+
+        Please start Livebook with the following command:
+
+        LIVEBOOK_NODE=livebook@127.0.0.1 livebook server
+        """)
+        System.halt(1)
+
+      {:error, :no_livebook_session} ->
+        IO.puts("""
+        Error: No livebook session found for #{file_path}
+
+        Make sure you open #{file_path} in Livebook before running this command.
+        """)
+        System.halt(1)
+    end
+  end
+
+  defp ensure_node_started do
+    rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
+    Node.start(node_name)
+    Node.set_cookie(Node.self(), :secret)
+  end
+
   defp print_help do
     IO.puts("""
     LivebookTools - Utilities for working with Livebook files
@@ -201,6 +260,8 @@ defmodule LivebookTools.CLI do
       watch <file>              Watch a Livebook file for changes and sync with open Livebook session
       run <file>                Convert a Livebook file to an Elixir script and run it
       convert <input> <output>  Convert a Livebook file to an Elixir script and save it to the specified location
+      mcp_server                Start the MCP server running over STDIO
+      get_livemd_outputs <file>  Get the outputs of a Livebook file
 
     Options:
       -h, --help                Show this help message
