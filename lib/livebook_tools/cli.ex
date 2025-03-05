@@ -134,6 +134,10 @@ defmodule LivebookTools.CLI do
     end
   end
 
+  ############################################################
+  ##                        COMMANDS                        ##
+  ############################################################
+
   @doc """
   Watches a Livebook file for changes and syncs it with an open Livebook session.
   """
@@ -144,30 +148,10 @@ defmodule LivebookTools.CLI do
 
     LivebookTools.Watcher.start_link(file_path, fn file_path ->
       Logger.info("File #{file_path} changed, syncing...")
-
-      with {:ok, livebook_node} <- LivebookTools.Sync.discover_livebook_node(),
-           true <- Node.connect(livebook_node),
-           {:ok, livebook_session_pid} <-
-             LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
-        LivebookTools.Sync.sync(livebook_session_pid, file_path)
-        Livebook.Session.queue_full_evaluation(livebook_session_pid, [])
-      else
-        {:error, :no_livebook_node} ->
-          Logger.error("""
-          No livebook node found.
-
-          Please start Livebook with the following command:
-
-          LIVEBOOK_NODE=livebook@127.0.0.1 livebook server
-          """)
-
-        {:error, :no_livebook_session} ->
-          Logger.error("""
-          No livebook session found for #{file_path}
-
-          Make sure you open #{file_path} in Livebook before running this command.
-          """)
-      end
+      with_livebook_session(file_path, fn livebook_pid ->
+        LivebookTools.Sync.sync(livebook_pid, file_path)
+        Livebook.Session.queue_full_evaluation(livebook_pid, [])
+      end)
     end)
 
     :timer.sleep(:infinity)
@@ -204,6 +188,9 @@ defmodule LivebookTools.CLI do
     end
   end
 
+  @doc """
+  Starts the MCP server running over STDIO.
+  """
   def mcp_server() do
     ensure_node_started()
     LivebookTools.MCPServer.start()
@@ -215,23 +202,57 @@ defmodule LivebookTools.CLI do
   def get_livemd_outputs(file_path) do
     ensure_node_started()
     file_path = Path.expand(file_path)
-
-    with {:ok, livebook_node} <- LivebookTools.Sync.discover_livebook_node(),
-         true <- Node.connect(livebook_node),
-         {:ok, livebook_pid} <- LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
+    with_livebook_session(file_path, fn livebook_pid ->
       outputs = LivebookTools.Sync.get_livemd_outputs(livebook_pid)
       IO.puts(outputs)
+    end)
+  end
+
+
+  ############################################################
+  ##                        HELPERS                         ##
+  ############################################################
+
+  defp ensure_node_started do
+    rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
+    Node.start(node_name)
+    Node.set_cookie(Node.self(), :secret)
+  end
+
+  defp with_livebook_session(file_path, success_fn) do
+    livebook_node = System.get_env("LIVEBOOK_NODE", "livebook@127.0.0.1") |> String.to_atom()
+
+    with {:ok, discovered_node} <- LivebookTools.Sync.discover_livebook_node(),
+         true <- discovered_node == livebook_node || {:error, :wrong_node, discovered_node},
+         true <- Node.connect(livebook_node),
+         {:ok, livebook_pid} <- LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
+      success_fn.(livebook_pid)
     else
       {:error, :no_livebook_node} ->
         IO.puts("""
         Error: No livebook node found.
 
-        Please start Livebook with the following command:
+        Please make sure Livebook is running and the node name and cookie match your configuration.
+        You can configure these values using environment variables:
 
-        LIVEBOOK_NODE=livebook@127.0.0.1 livebook server
+        LIVEBOOK_NODE=livebook@127.0.0.1
+        LIVEBOOK_COOKIE=secret
+
+        For more information, see the project README:
+        https://github.com/thmsmlr/livebook_tools#running-livebook
         """)
         System.halt(1)
+      {:error, :wrong_node, discovered_node} ->
+        IO.puts("""
+        Error: Found a Livebook node, but it doesn't match your LIVEBOOK_NODE setting.
 
+        Found: #{discovered_node}
+        Expected: #{livebook_node}
+
+        Please update your LIVEBOOK_NODE environment variable to match the running instance.
+        """)
+        System.halt(1)
       {:error, :no_livebook_session} ->
         IO.puts("""
         Error: No livebook session found for #{file_path}
@@ -239,14 +260,21 @@ defmodule LivebookTools.CLI do
         Make sure you open #{file_path} in Livebook before running this command.
         """)
         System.halt(1)
-    end
-  end
+      false ->
+        IO.puts("""
+        Error: Could not connect to Livebook node #{livebook_node}.
 
-  defp ensure_node_started do
-    rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
-    Node.start(node_name)
-    Node.set_cookie(Node.self(), :secret)
+        Please make sure Livebook is running and the node name and cookie match your configuration.
+        You can configure these values using environment variables:
+
+        LIVEBOOK_NODE=livebook@127.0.0.1
+        LIVEBOOK_COOKIE=secret
+
+        For more information, see the project README:
+        https://github.com/thmsmlr/livebook_tools#running-livebook
+        """)
+        System.halt(1)
+    end
   end
 
   defp print_help do
