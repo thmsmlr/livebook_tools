@@ -4,9 +4,8 @@ defmodule LivebookTools.MCPServer do
   """
 
   def start() do
-    with :ok <- expect_initialize() do
-      handle_request_loop()
-    end
+    :io.setopts(binary: true)
+    handle_request_loop()
   end
 
   defp handle_request_loop do
@@ -14,9 +13,7 @@ defmodule LivebookTools.MCPServer do
       try do
         handle_request(request)
       rescue
-        error ->
-          IO.puts(:stderr, "Error: #{inspect(error)}")
-
+        _error ->
           reply(%{
             jsonrpc: "2.0",
             id: request["id"],
@@ -26,9 +23,12 @@ defmodule LivebookTools.MCPServer do
             }
           })
       end
-    end
 
-    handle_request_loop()
+      handle_request_loop()
+    else
+      :eof ->
+        :ok
+    end
   end
 
   defp handle_request(%{"method" => "tools/list", "id" => request_id}) do
@@ -50,7 +50,8 @@ defmodule LivebookTools.MCPServer do
               properties: %{
                 file_path: %{
                   type: "string",
-                  description: "The path to the livemd file for the Livebook"
+                  description:
+                    "The absolute path to the livemd file for the Livebook, it must be a full path like /Users/thomas/path/to/file.livemd"
                 }
               }
             },
@@ -70,13 +71,21 @@ defmodule LivebookTools.MCPServer do
     })
   end
 
+  defp handle_request(%{"method" => "resources/list", "id" => request_id}) do
+    reply(%{
+      jsonrpc: "2.0",
+      id: request_id,
+      result: %{
+        resources: []
+      }
+    })
+  end
+
   defp handle_request(%{"method" => "tools/call", "id" => request_id, "params" => params}) do
     try do
       handle_tool_call(request_id, params)
     rescue
       error ->
-        IO.puts(:stderr, "Error: #{inspect(error)}")
-
         reply(%{
           jsonrpc: "2.0",
           id: request_id,
@@ -85,9 +94,24 @@ defmodule LivebookTools.MCPServer do
     end
   end
 
-  defp handle_request(%{"method" => "notifications/initialized"}) do
-    :ok
-  end
+  defp handle_request(%{"method" => "initialize", "id" => request_id}),
+    do:
+    reply(%{
+      jsonrpc: "2.0",
+      id: request_id,
+      result: %{
+        protocolVersion: "2024-11-05",
+        capabilities: %{
+          tools: %{ listChanged: true }
+        },
+        serverInfo: %{
+          name: "LivebookTools MCP Server",
+          version: "0.0.1"
+        }
+      }
+    })
+
+  defp handle_request(%{"method" => "notifications/initialized"}), do: :ok
 
   defp handle_request(request) do
     reply(%{
@@ -106,7 +130,6 @@ defmodule LivebookTools.MCPServer do
          {:ok, livebook_pid} <-
            LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path),
          outputs <- LivebookTools.Sync.get_livemd_outputs(livebook_pid) do
-
       reply(%{
         jsonrpc: "2.0",
         id: request_id,
@@ -121,8 +144,6 @@ defmodule LivebookTools.MCPServer do
       })
     else
       {:error, reason} ->
-        IO.puts(:stderr, "Error: #{inspect(reason)}")
-
         reply(%{
           jsonrpc: "2.0",
           id: request_id,
@@ -135,47 +156,33 @@ defmodule LivebookTools.MCPServer do
     end
   end
 
-  defp expect_initialize() do
-    case get_line() do
-      {:ok, %{"method" => "initialize", "id" => id}} ->
-        Livebook.Storage.start_link([])
-
-        reply(%{
-          jsonrpc: "2.0",
-          id: id,
-          result: %{
-            protocolVersion: "2024-11-05",
-            capabilities: %{
-              logging: %{},
-              prompts: %{},
-              resources: %{},
-              tools: %{
-                listChanged: true
-              }
-            },
-            serverInfo: %{
-              name: "LivebookTools MCP Server",
-              version: "0.0.1"
-            }
-          }
-        })
-
-      _ ->
-        raise "Expected initialize message"
-    end
-  end
-
   defp reply(msg) do
-    line = Jason.encode!(msg)
+    line =
+      msg
+      |> Jason.encode!()
+      |> remove_non_ascii()
+
     tmpdir = System.tmp_dir()
     File.write(Path.join(tmpdir, "livebook_tools_mcp_server.log"), "REPLY: #{line}\n", [:append])
     IO.puts(line)
   end
 
+  defp remove_non_ascii(data) when is_binary(data) do
+    data
+    |> String.codepoints()
+    |> Enum.filter(fn char -> String.to_charlist(char) |> hd() < 128 end)
+    |> Enum.join("")
+  end
+
   defp get_line() do
-    line = IO.gets("")
-    tmpdir = System.tmp_dir()
-    File.write(Path.join(tmpdir, "livebook_tools_mcp_server.log"), "RECV: #{line}", [:append])
-    Jason.decode(line)
+    case IO.gets("") do
+      :eof ->
+        :eof
+
+      line when is_binary(line) ->
+        tmpdir = System.tmp_dir()
+        File.write(Path.join(tmpdir, "livebook_tools_mcp_server.log"), "RECV: #{line}", [:append])
+        Jason.decode(line)
+    end
   end
 end

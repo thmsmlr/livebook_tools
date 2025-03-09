@@ -21,7 +21,7 @@ defmodule LivebookTools.Sync do
       end
     ])
     |> case do
-      {pid, _} -> {:ok, pid}
+      {pid, _} when is_pid(pid) -> {:ok, pid}
       _ -> {:error, :no_livebook_session}
     end
   end
@@ -268,7 +268,7 @@ defmodule LivebookTools.Sync do
           if before_section do
             current_sections |> Enum.find_index(&(&1.id == before_section.id))
           else
-            length(current_sections)
+            length(current_sections) - 1
           end
 
         Livebook.Session.insert_section(livebook_pid, before_section_idx)
@@ -306,9 +306,16 @@ defmodule LivebookTools.Sync do
       end
     )
     |> Enum.with_index()
-    |> Enum.flat_map(fn {{:diff, diff_script}, section_idx} ->
-      current_section = current_sections |> Enum.at(section_idx)
-      diff_script |> Enum.map(&{&1, current_section})
+    |> Enum.flat_map(fn
+      {{:diff, diff_script}, section_idx} ->
+        current_section = current_sections |> Enum.at(section_idx)
+        diff_script |> Enum.map(&{&1, current_section})
+
+      {{:del, _}, section_idx} ->
+        current_section = current_sections |> Enum.at(section_idx)
+        Livebook.Session.delete_section(livebook_pid, current_section.id, false)
+        []
+
     end)
     |> Enum.each(fn
       {{:eq, {_current_cell, _new_cell}}, _section} ->

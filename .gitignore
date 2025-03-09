@@ -22,3 +22,5 @@ livebook_tools-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 /livebook_tools
+
+todo.md

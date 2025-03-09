@@ -144,10 +144,17 @@ defmodule LivebookTools.CLI do
   def watch(file_path) do
     ensure_node_started()
     file_path = Path.expand(file_path)
+
+    # Make sure that we can connect to the Livebook session for this file, will exit if not
+    with_livebook_session(file_path, fn _livebook_pid ->
+      IO.puts("Connected to Livebook session for #{file_path} ")
+    end)
+
     IO.puts("Watching #{file_path} for changes...")
 
     LivebookTools.Watcher.start_link(file_path, fn file_path ->
       Logger.info("File #{file_path} changed, syncing...")
+
       with_livebook_session(file_path, fn livebook_pid ->
         LivebookTools.Sync.sync(livebook_pid, file_path)
         Livebook.Session.queue_full_evaluation(livebook_pid, [])
@@ -202,12 +209,12 @@ defmodule LivebookTools.CLI do
   def get_livemd_outputs(file_path) do
     ensure_node_started()
     file_path = Path.expand(file_path)
+
     with_livebook_session(file_path, fn livebook_pid ->
       outputs = LivebookTools.Sync.get_livemd_outputs(livebook_pid)
       IO.puts(outputs)
     end)
   end
-
 
   ############################################################
   ##                        HELPERS                         ##
@@ -226,7 +233,8 @@ defmodule LivebookTools.CLI do
     with {:ok, discovered_node} <- LivebookTools.Sync.discover_livebook_node(),
          true <- discovered_node == livebook_node || {:error, :wrong_node, discovered_node},
          true <- Node.connect(livebook_node),
-         {:ok, livebook_pid} <- LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
+         {:ok, livebook_pid} <-
+           LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
       success_fn.(livebook_pid)
     else
       {:error, :no_livebook_node} ->
@@ -242,7 +250,9 @@ defmodule LivebookTools.CLI do
         For more information, see the project README:
         https://github.com/thmsmlr/livebook_tools#running-livebook
         """)
+
         System.halt(1)
+
       {:error, :wrong_node, discovered_node} ->
         IO.puts("""
         Error: Found a Livebook node, but it doesn't match your LIVEBOOK_NODE setting.
@@ -252,14 +262,18 @@ defmodule LivebookTools.CLI do
 
         Please update your LIVEBOOK_NODE environment variable to match the running instance.
         """)
+
         System.halt(1)
+
       {:error, :no_livebook_session} ->
         IO.puts("""
         Error: No livebook session found for #{file_path}
 
         Make sure you open #{file_path} in Livebook before running this command.
         """)
+
         System.halt(1)
+
       false ->
         IO.puts("""
         Error: Could not connect to Livebook node #{livebook_node}.
@@ -273,6 +287,7 @@ defmodule LivebookTools.CLI do
         For more information, see the project README:
         https://github.com/thmsmlr/livebook_tools#running-livebook
         """)
+
         System.halt(1)
     end
   end

@@ -36,11 +36,11 @@ In its simplest form, all you need to do is add the two environment variables to
 
 ```bash
 export LIVEBOOK_NODE="livebook@127.0.0.1"
-export LIVEBOOK_COOKIE="some_secret_value"
+export LIVEBOOK_COOKIE="secret"
 ```
 
 Then when you run the Livebook tools or Livebook, both programs will discover these values and make sure that they can connect to each other.
-If you're running using Livebook Desktop, then you may need to add these values to the `~/.livebookdesktop.sh` file.
+If you're running using Livebook Desktop, then you may need to add these values to the `~/.livebookdesktop.sh` file as well.
 For more information on Livebook Desktop, check out the [Livebook HexDocs](https://hexdocs.pm/livebook/readme.html#livebook-desktop).  
 
 
