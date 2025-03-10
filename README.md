@@ -54,3 +54,37 @@ For more information on MCP works with Cursor, check out the [Cursor MCP docs](h
 ![Cursor Create MCP Server](./assets/cursor-create-mcp-server.png)
 ![Cursor MCP Server Connected](./assets/cursor-mcp-server.png)
 
+
+## Useful Tips
+
+Sometimes you want to customize how the code runs, whether it's running in Livebook or via the command line using `livebook_tools run <file>`.
+There are some easy code snippets that you can use to detect whether you're running in a live book or on the command line, 
+
+```elixir
+# Detect if we're running in a livebook
+is_livebook = !String.ends_with?(__ENV__.file, ".exs")
+
+# If we're running in a livebook, argv doesn't really make sense, so we'll just return an empty list
+argv = if is_livebook, do: [], else: System.argv()
+
+# Parse command line arguments
+# We'll use OptionParser to handle both flags and positional arguments
+{parsed_opts, positional_args, invalid_opts} =
+  OptionParser.parse(
+    argv,
+    strict: [
+      dry_run: :boolean,
+      limit: :integer
+    ],
+    aliases: [
+      d: :dry_run,
+      l: :limit
+    ]
+  )
+
+# Extract options with default values, in livebook it'll just use the default values
+dry_run = Keyword.get(parsed_opts, :dry_run, false)
+limit = Keyword.get(parsed_opts, :limit, 10)
+```
+
+

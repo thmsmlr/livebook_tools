@@ -10,7 +10,7 @@ defmodule LivebookTools.CLI do
   """
   def main(args) do
     {opts, cmd_args, _} =
-      OptionParser.parse(
+      OptionParser.parse_head(
         args,
         strict: [help: :boolean],
         aliases: [h: :help]
@@ -52,9 +52,11 @@ defmodule LivebookTools.CLI do
         end
 
       {_, ["run" | rest]} ->
+        IO.inspect(rest, label: "RUN REST")
+
         case rest do
-          [file_path] ->
-            run(file_path)
+          [file_path | argv] ->
+            run(file_path, argv)
 
           [] ->
             IO.puts("Error: Missing file path for run command\n")
@@ -96,7 +98,7 @@ defmodule LivebookTools.CLI do
   @doc """
   Converts a Livebook file to an Elixir script and runs it.
   """
-  def run(file_path) do
+  def run(file_path, argv) do
     with {:ok, content} <- File.read(file_path),
          {notebook, _} <- Livebook.LiveMarkdown.notebook_from_livemd(content) do
       exs_file = """
@@ -118,9 +120,11 @@ defmodule LivebookTools.CLI do
       File.write!(tmp_file_path, exs_file)
       File.write!(tmp_after_file_path, after_exs_file)
 
+      escaped_argv = Enum.map_join(argv, " ", fn arg -> String.replace(arg, "'", "\\'") end)
+
       port =
         Port.open(
-          {:spawn, "bash -c 'cat #{tmp_after_file_path} | iex --dot-iex #{tmp_file_path}'"},
+          {:spawn, "bash -c 'cat #{tmp_after_file_path} | iex --dot-iex #{tmp_file_path} -- #{escaped_argv}'"},
           [
             :nouse_stdio,
             :exit_status
@@ -303,7 +307,7 @@ defmodule LivebookTools.CLI do
 
     Commands:
       watch <file>              Watch a Livebook file for changes and sync with open Livebook session
-      run <file>                Convert a Livebook file to an Elixir script and run it
+      run <file> [args]         Convert a Livebook file to an Elixir script and run it
       convert <input> <output>  Convert a Livebook file to an Elixir script and save it to the specified location
       mcp_server                Start the MCP server running over STDIO
       get_livemd_outputs <file>  Get the outputs of a Livebook file
