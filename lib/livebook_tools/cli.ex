@@ -52,7 +52,6 @@ defmodule LivebookTools.CLI do
         end
 
       {_, ["run" | rest]} ->
-
         case rest do
           [file_path | argv] ->
             run(file_path, argv)
@@ -101,40 +100,30 @@ defmodule LivebookTools.CLI do
     with {:ok, content} <- File.read(file_path),
          {notebook, _} <- Livebook.LiveMarkdown.notebook_from_livemd(content) do
       exs_file = """
-      Process.put(:livebook_success, false)
       #{Livebook.Notebook.Export.Elixir.notebook_to_elixir(notebook)}
-      Process.put(:livebook_success, true)
-      """
-
-      after_exs_file = """
-      System.halt(if Process.get(:livebook_success), do: 0, else: 1)
+      send(pid("#{inspect(self())}"), :__livebook_tools_success__)
       """
 
       dir = Path.dirname(file_path)
       basename = Path.basename(file_path, Path.extname(file_path))
       random_string = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
       tmp_file_path = Path.join(dir, ".#{basename}-#{random_string}.exs")
-      tmp_after_file_path = Path.join(dir, ".#{basename}-#{random_string}.after.exs")
 
       File.write!(tmp_file_path, exs_file)
-      File.write!(tmp_after_file_path, after_exs_file)
 
-      escaped_argv = Enum.map_join(argv, " ", fn arg -> String.replace(arg, "'", "\\'") end)
-
-      port =
-        Port.open(
-          {:spawn, "bash -c 'cat #{tmp_after_file_path} | iex --dot-iex #{tmp_file_path} -- #{escaped_argv}'"},
-          [
-            :nouse_stdio,
-            :exit_status
-          ]
-        )
+      System.argv(argv)
+      args = [:ack, self(), Process.group_leader(), 0, [dot_iex: tmp_file_path]]
+      :proc_lib.start(IEx.Evaluator, :init, args)
 
       receive do
-        {^port, {:exit_status, exit_code}} ->
-          File.rm(tmp_file_path)
-          File.rm(tmp_after_file_path)
-          System.halt(exit_code)
+        :__livebook_tools_success__ ->
+          File.rm!(tmp_file_path)
+          System.halt(0)
+      after
+        0 ->
+          File.rm!(tmp_file_path)
+          IO.puts(IO.ANSI.red() <> "Error executing #{file_path}, error printed above" <> IO.ANSI.reset())
+          System.halt(1)
       end
     end
   end
