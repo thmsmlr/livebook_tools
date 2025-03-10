@@ -52,7 +52,6 @@ defmodule LivebookTools.CLI do
         end
 
       {_, ["run" | rest]} ->
-        IO.inspect(rest, label: "RUN REST")
 
         case rest do
           [file_path | argv] ->
