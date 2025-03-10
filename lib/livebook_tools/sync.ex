@@ -30,27 +30,33 @@ defmodule LivebookTools.Sync do
     # Get all registered names from the Erlang Port Mapper Daemon
     case :erl_epmd.names() do
       {:ok, names} ->
-        Enum.find_value(names, fn {name, _port} ->
-          node_name = "#{name}@127.0.0.1" |> String.to_atom()
-          was_connected = Node.list(:connected) |> Enum.member?(node_name)
-
-          with true <- Node.connect(node_name) do
-            # Scan for Livebook processes
-            livebook_processes =
-              :rpc.call(node_name, :erlang, :registered, [])
-              |> Enum.filter(fn proc ->
-                to_string(proc) =~ "Livebook.Session"
-              end)
-
-            # Disconnect if we weren't connected before
-            if not was_connected do
-              Node.disconnect(node_name)
+        discovered_node =
+          Enum.find_value(names, fn {name, _port} ->
+            node_name = "#{name}@127.0.0.1" |> String.to_atom()
+            was_connected = Node.list(:connected) |> Enum.member?(node_name)
+    
+            with true <- Node.connect(node_name) do
+              # Scan for Livebook processes
+              livebook_processes =
+                :rpc.call(node_name, :erlang, :registered, [])
+                |> Enum.filter(fn proc ->
+                  to_string(proc) =~ "Livebook.Session"
+                end)
+    
+              # Disconnect if we weren't connected before
+              if not was_connected do
+                Node.disconnect(node_name)
+              end
+    
+              # Return the node if it has Livebook processes
+              if livebook_processes != [], do: node_name, else: nil
             end
-
-            # Return the node if it has Livebook processes
-            if livebook_processes != [], do: {:ok, node_name}, else: {:error, :no_livebook_node}
-          end
-        end)
+          end)
+    
+        case discovered_node do
+          nil -> {:error, :no_livebook_node}
+          discovered_node when is_atom(discovered_node) -> {:ok, discovered_node}
+        end
 
       {:error, reason} ->
         raise "No livebook node found: #{inspect(reason)}"
