@@ -109,10 +109,11 @@ defmodule LivebookTools.CLI do
       System.halt(if Process.get(:livebook_success), do: 0, else: 1)
       """
 
+      dir = Path.dirname(file_path)
       basename = Path.basename(file_path, Path.extname(file_path))
       random_string = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-      tmp_file_path = System.tmp_dir() <> "/" <> basename <> random_string <> ".exs"
-      tmp_after_file_path = System.tmp_dir() <> "/" <> basename <> random_string <> ".after.exs"
+      tmp_file_path = Path.join(dir, ".#{basename}-#{random_string}.exs")
+      tmp_after_file_path = Path.join(dir, ".#{basename}-#{random_string}.after.exs")
 
       File.write!(tmp_file_path, exs_file)
       File.write!(tmp_after_file_path, after_exs_file)
@@ -129,6 +130,7 @@ defmodule LivebookTools.CLI do
       receive do
         {^port, {:exit_status, exit_code}} ->
           File.rm(tmp_file_path)
+          File.rm(tmp_after_file_path)
           System.halt(exit_code)
       end
     end
