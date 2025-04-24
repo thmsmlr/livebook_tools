@@ -218,7 +218,8 @@ defmodule LivebookTools.CLI do
     rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
     node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
     Node.start(node_name)
-    Node.set_cookie(Node.self(), :secret)
+    secret = String.to_atom(System.get_env("LIVEBOOK_COOKIE", "secret"))
+    Node.set_cookie(Node.self(), secret)
   end
 
   defp with_livebook_session(file_path, success_fn) do

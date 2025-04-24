@@ -13,8 +13,9 @@ defmodule LivebookTools.Sync do
         end)
         |> Enum.find_value(fn pid ->
           state = :sys.get_state(pid)
+          file_path = get_in(state, [Access.key!(:data), Access.key!(:file), Access.key!(:path)])
 
-          if state.data.file.path == unquote(file_path) do
+          if file_path == unquote(file_path) do
             pid
           end
         end)
@@ -34,25 +35,29 @@ defmodule LivebookTools.Sync do
           Enum.find_value(names, fn {name, _port} ->
             node_name = "#{name}@127.0.0.1" |> String.to_atom()
             was_connected = Node.list(:connected) |> Enum.member?(node_name)
-    
-            with true <- Node.connect(node_name) do
-              # Scan for Livebook processes
-              livebook_processes =
-                :rpc.call(node_name, :erlang, :registered, [])
-                |> Enum.filter(fn proc ->
-                  to_string(proc) =~ "Livebook.Session"
-                end)
-    
-              # Disconnect if we weren't connected before
-              if not was_connected do
-                Node.disconnect(node_name)
-              end
-    
-              # Return the node if it has Livebook processes
-              if livebook_processes != [], do: node_name, else: nil
+
+            case Node.connect(node_name) do
+              true ->
+                # Scan for Livebook processes
+                livebook_processes =
+                  :rpc.call(node_name, :erlang, :registered, [])
+                  |> Enum.filter(fn proc ->
+                    to_string(proc) =~ "Livebook.Session"
+                  end)
+
+                # Disconnect if we weren't connected before
+                if not was_connected do
+                  Node.disconnect(node_name)
+                end
+
+                # Return the node if it has Livebook processes
+                if livebook_processes != [], do: node_name, else: nil
+
+              :ignored ->
+                nil
             end
           end)
-    
+
         case discovered_node do
           nil -> {:error, :no_livebook_node}
           discovered_node when is_atom(discovered_node) -> {:ok, discovered_node}
@@ -321,7 +326,6 @@ defmodule LivebookTools.Sync do
         current_section = current_sections |> Enum.at(section_idx)
         Livebook.Session.delete_section(livebook_pid, current_section.id, false)
         []
-
     end)
     |> Enum.each(fn
       {{:eq, {_current_cell, _new_cell}}, _section} ->
