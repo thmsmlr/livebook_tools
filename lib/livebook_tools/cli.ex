@@ -216,7 +216,16 @@ defmodule LivebookTools.CLI do
 
   defp ensure_node_started do
     rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
+
+    host =
+      if System.get_env("ERL_AFLAGS")
+         |> String.contains?("-proto_dist inet6_tcp") do
+        "::1"
+      else
+        "127.0.0.1"
+      end
+
+    node_name = String.to_atom("livebook_tools_#{rand_str}@#{host}")
     Node.start(node_name)
     secret = String.to_atom(System.get_env("LIVEBOOK_COOKIE", "secret"))
     Node.set_cookie(Node.self(), secret)
