@@ -33,7 +33,15 @@ defmodule LivebookTools.Sync do
       {:ok, names} ->
         discovered_node =
           Enum.find_value(names, fn {name, _port} ->
-            node_name = "#{name}@127.0.0.1" |> String.to_atom()
+            host =
+              if System.get_env("ERL_AFLAGS")
+                 |> String.contains?("-proto_dist inet6_tcp") do
+                "::1"
+              else
+                "127.0.0.1"
+              end
+
+            node_name = "#{name}@#{host}" |> String.to_atom()
             was_connected = Node.list(:connected) |> Enum.member?(node_name)
 
             case Node.connect(node_name) do
